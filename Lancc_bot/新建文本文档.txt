@@ -1,0 +1,62 @@
+import sqlite3
+import os
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+
+TOKEN = os.getenv("BOT_TOKEN")
+
+# 创建数据库
+conn = sqlite3.connect("money.db")
+cursor = conn.cursor()
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    type TEXT,
+    amount REAL
+)
+""")
+conn.commit()
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("记账机器人已启动！\n输入：收入 100 或 支出 50\n输入：统计 查看总账")
+
+async def record(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    user_id = update.message.from_user.id
+
+    if text.startswith("收入"):
+        amount = float(text.split()[1])
+        cursor.execute("INSERT INTO records (user_id, type, amount) VALUES (?, ?, ?)",
+                       (user_id, "收入", amount))
+        conn.commit()
+        await update.message.reply_text(f"已记录收入 {amount}")
+
+    elif text.startswith("支出"):
+        amount = float(text.split()[1])
+        cursor.execute("INSERT INTO records (user_id, type, amount) VALUES (?, ?, ?)",
+                       (user_id, "支出", amount))
+        conn.commit()
+        await update.message.reply_text(f"已记录支出 {amount}")
+
+    elif text == "统计":
+        cursor.execute("SELECT type, SUM(amount) FROM records WHERE user_id=? GROUP BY type", (user_id,))
+        rows = cursor.fetchall()
+        income = 0
+        expense = 0
+        for row in rows:
+            if row[0] == "收入":
+                income = row[1]
+            elif row[0] == "支出":
+                expense = row[1]
+        balance = income - expense
+        await update.message.reply_text(f"总收入: {income}\n总支出: {expense}\n余额: {balance}")
+
+    else:
+        await update.message.reply_text("格式错误，请输入：收入 100 或 支出 50")
+
+app = ApplicationBuilder().token(TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, record))
+
+app.run_polling()
